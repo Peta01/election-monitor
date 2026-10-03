@@ -4,6 +4,10 @@ Pythonová aplikace pro stahování otevřených dat o volbách do zastupitelste
 
 ## Lokální spuštění
 
+**Pro běžné uživatele (Windows):** stáhněte ZIP z GitHubu, rozbalte, spusťte `INSTALOVAT.bat` a potom `SPUSTIT.bat`. Podrobný návod je v [NAVOD-INSTALACE.md](NAVOD-INSTALACE.md). Instalace případně doinstaluje i Python.
+
+**Pro vývojáře:**
+
 Podrobný návod k instalaci, nastavení, stahování výsledků a řešení potíží najdete v [uživatelském manuálu](docs/uzivatelsky-manual.md).
 
 ```powershell
