@@ -1,0 +1,28 @@
+[project]
+name = "election-monitor"
+version = "0.1.0"
+description = "Polling Czech election open data and visualizing time series"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "jinja2>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
