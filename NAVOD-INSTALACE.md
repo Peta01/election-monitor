@@ -22,9 +22,15 @@ Postup je určen i pro úplné začátečníky. Nepotřebujete nic předem insta
 
 Obce je vhodné přidat před zahájením sčítání (volby 9. 10. 2026), aby se data ukládala od začátku. Sledované obce a výsledky zůstávají uložené ve složce `data` i po restartu.
 
-## Aktualizace
+## Aktualizace (i během voleb)
 
-Stáhněte novou verzi jako ZIP, rozbalte ji do nové složky a spusťte `INSTALOVAT.bat`. Chcete-li zachovat dosavadní data, zkopírujte do nové složky původní složku `data`.
+1. Zavřete okno se spuštěnou aplikací (`SPUSTIT.bat`).
+2. Dvakrát klikněte na **`AKTUALIZOVAT.bat`**. Stáhne nejnovější verzi z GitHubu, přepíše programové soubory a aktualizuje knihovny.
+3. Znovu spusťte **`SPUSTIT.bat`**.
+
+Sledované obce a uložené výsledky (složka `data`) zůstanou zachovány. Před každou aktualizací se navíc vytvoří záloha databáze ve složce `data\zaloha`. Aktualizace trvá řádově desítky sekund. Sledování se během ní zastaví, takže data za tu dobu se nestahují; po spuštění se výsledky ČSÚ načtou znovu.
+
+Pokud se `AKTUALIZOVAT.bat` samotný změní, stáhněte novou verzi jako ZIP a nahraďte ho ručně.
 
 ## Řešení potíží
 
