@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -22,6 +22,8 @@ class PartyResult:
     votes: int
     percent: float | None = None
     mandates_virtual: int | None = None
+    candidate_count: int = 0
+    constituency_id: str = "0"
 
 
 @dataclass(slots=True)
@@ -32,3 +34,9 @@ class ElectionSnapshot:
     source_hash: str
     progress: PollingProgress
     party_results: list[PartyResult]
+    seats_to_elect: int
+    seat_counts_by_constituency: dict[str, int] = field(default_factory=dict)
+    valid_votes_by_constituency: dict[str, int] = field(default_factory=dict)
+    threshold_percent: int | None = None
+    lottery_required: bool = False
+    allocation_error: str | None = None

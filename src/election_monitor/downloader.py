@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
@@ -31,7 +31,7 @@ class Downloader:
         return DownloadedPayload(
             url=url,
             content=content,
-            fetched_at=datetime.now(timezone.utc),
+            fetched_at=datetime.now(UTC),
             content_hash=hashlib.sha256(content).hexdigest(),
         )
 

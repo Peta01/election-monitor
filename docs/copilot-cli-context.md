@@ -1,22 +1,23 @@
-# Copilot CLI Project Context
+# Kontext projektu pro Copilot CLI
 
-Repository: `Peta01/election-monitor`
+Repozitář: `Peta01/election-monitor`
 
-## Project goal
-Build a Python app that polls Czech municipal election open data, stores snapshots in SQLite, and shows a web UI with a time series of results.
+## Cíl projektu
+Vytvořit aplikaci v Pythonu, která stahuje otevřená data o volbách do zastupitelstev obcí, ukládá jejich snímky do SQLite a zobrazuje časový vývoj výsledků ve webovém rozhraní.
 
-## Current decisions
-- Stack: Python, SQLite, web UI.
-- Development happens locally in VS Code.
-- One app instance = one municipality.
-- Polling is on-demand.
-- Shared SQLite DB is fine.
-- It is acceptable to download the full dataset if needed, then filter locally.
-- The UI should later show a “virtual council composition” computed from current election results.
-- The legal basis for council seat allocation is Czech law 491/2001 Coll.
+## Přijatá rozhodnutí
+- Technologie: Python, SQLite a webové rozhraní.
+- Vývoj probíhá lokálně ve VS Code.
+- Jedna instance aplikace sleduje jednu obec.
+- Stahování se spouští na vyžádání.
+- Databázi SQLite lze sdílet.
+- Aplikace načítá seznam zastupitelstev z číselníku ČSÚ a používá XML endpoint pro zvolené zastupitelstvo, určený kódem `KODZASTUP`.
+- Rozdělení mandátů mezi volební strany se počítá z aktuálních výsledků podle § 45 odst. 1 a 2 zákona č. 491/2001 Sb.
 
-## Repository status
-A scaffold already exists with:
+## Stav repozitáře
+Uživatelský návod k instalaci a použití je v `docs/uzivatelsky-manual.md`.
+
+Základ aplikace tvoří:
 - `src/election_monitor/app.py`
 - `src/election_monitor/config.py`
 - `src/election_monitor/downloader.py`
@@ -24,39 +25,24 @@ A scaffold already exists with:
 - `src/election_monitor/db.py`
 - `src/election_monitor/models.py`
 - `src/election_monitor/web.py`
+- `src/election_monitor/allocation.py`
 
-The current parser is only a placeholder.
+Po spuštění příkazem `python -m election_monitor` se spustí místní webová aplikace na `http://127.0.0.1:8000` a otevře se kaskádový výběr kraje, okresu a obce v prohlížeči. Výběr obce ji trvale zaregistruje ke sledování v tabulce `tracked_municipalities`. Pozadí načítá všechny aktivní obce hned po startu a každých 60 sekund, nezávisle na otevřených stránkách. Seznam zastupitelstev se získává z oficiálního registru ČSÚ ve formátu CSV v ZIP archivu a doplňuje se názvy krajů a okresů z číselníku NUTS ČSÚ; číselníky se cachují lokálně na 24 hodin. Změněné snímky ukládá do SQLite, a to jen když se změní počet zpracovaných okrsků. Odebrání z aktivního sledování uchová historické snímky.
 
-## Next task
-Implement the real parser for the election open data source:
-- Source page: `https://volby.gov.cz/opendata/kv2026/kv2026_opendata.htm`
-- Determine actual file format and structure.
-- Support ZIP/CSV/XML if necessary.
-- Parse results for one selected municipality only.
-- Normalize data into:
-  - municipality reference
-  - snapshot metadata
-  - party/list results
-  - turnout/progress metadata
-- Store snapshots in SQLite.
+Parser podporuje XML výsledky pro konkrétní zastupitelstvo ve volbách 2026. Načítá průběh zpracování, volební účast, počet volených zastupitelů, kandidátní listiny i volební obvody.
 
-## Additional goals
-- Keep the parser modular.
-- Make it easy to add a polling loop later.
-- Make it easy to compute virtual council seat allocation in a separate module.
-- Prefer clean, testable code.
+Výpočet mandátů snižuje kandidátně upravenou hranici od 5 % podle potřeby, přiděluje mandáty mezi volební strany pomocí d'Hondtových podílů a zaznamená případy, které vyžadují los. Rozdělení mandátů konkrétním kandidátům podle § 45 odst. 3 až 5 zatím není implementováno.
 
-## Important implementation constraints
-- Do not hardcode assumptions about file names until the real format is verified.
-- Use a robust detection layer for input format.
-- Preserve the architecture so the web UI can later query historical snapshots.
+## Další úkol
+Rozšířit webové rozhraní o prohlížení historických snímků a časový graf výsledků. Poté doplnit přidělování mandátů konkrétním kandidátům podle § 45 odst. 3 až 5.
 
-## Suggested immediate steps
-1. Inspect the open data source.
-2. Implement a parser abstraction.
-3. Add format-specific parsers.
-4. Wire parsing into SQLite persistence.
-5. Add basic tests.
+Dokumentace zdroje: `https://volby.gov.cz/opendata/kv2026/kv2026_opendata.htm`. Formát XML je popsán v `KV2026_XML.htm`. Endpoint pro konkrétní zastupitelstvo má tvar `https://volby.gov.cz/appdata/kv2026/20261009/odata/zastup/vysledky_obec_{KODZASTUP}.xml`. Živá data nejsou dostupná před zahájením zpracování voleb, proto se parser testuje pomocí XML příkladů.
 
-## Helpful URL
-- Open data source: https://volby.gov.cz/opendata/kv2026/kv2026_opendata.htm
+## Další cíle
+- Zachovat parser jako samostatný modul.
+- Usnadnit pozdější přidání pravidelného stahování.
+- Ponechat výpočet virtuálních mandátů v samostatném modulu.
+- Upřednostňovat přehledný a dobře testovatelný kód.
+
+## Užitečný odkaz
+- Otevřená data ČSÚ: `https://volby.gov.cz/opendata/kv2026/kv2026_opendata.htm`
