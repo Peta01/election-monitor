@@ -222,15 +222,7 @@ def home() -> HTMLResponse:
         for option in options
     )
     tracked_html = "".join(
-        f'<li><span><a class="tracked-link" '
-        f'href="/vysledky/{escape(item["code"], quote=True)}">'
-        f"<strong>{escape(_council_label(item))}</strong></a>"
-        f'<br><span class="muted">{escape(item["district_name"])} · '
-        f"{escape(item['region_name'])}</span>"
-        f'<br><span class="muted">{escape(_tracking_label(item))}</span></span>'
-        f'<form action="/sledovani/{escape(item["code"], quote=True)}/odebrat" method="post">'
-        '<button class="remove-button" type="submit">Přestat sledovat</button></form></li>'
-        for item in tracked_municipalities
+        _tracked_municipality_html(item) for item in tracked_municipalities
     )
     tracked_section = (
         f"<h2>Sledované obce ({len(tracked_municipalities)})</h2>"
@@ -460,20 +452,34 @@ _NO_CANDIDATE_VOTES = (
 )
 
 
-def _candidates_html(snapshot: ElectionSnapshot, has_districts: bool) -> str:
-    candidates, error = _load_candidates(snapshot.municipality.code)
-    if error:
-        return f'<p class="alert">Kandidáty se nepodařilo načíst: {escape(error)}</p>'
+def _candidates_html(
+    snapshot: ElectionSnapshot,
+    has_districts: bool,
+    candidates: list[Candidate] | None = None,
+) -> str:
+    if candidates is None:
+        candidates, error = _load_candidates(snapshot.municipality.code)
+        if error:
+            return f'<p class="alert">Kandidáty se nepodařilo načíst: {escape(error)}</p>'
     if not candidates:
         return '<p class="muted">Registr ČSÚ pro toto zastupitelstvo neobsahuje kandidáty.</p>'
+    is_simulation = snapshot.source_url.startswith("SIMULATION://")
+    simulation_groups = _candidate_groups(candidates) if is_simulation else []
     note = (
-        f'<p class="muted">{_NO_CANDIDATE_VOTES}</p>'
+        '<p class="muted">Hlasy kandidátů jsou v simulaci uměle rozděleny v rámci '
+        "hlasů kandidátní listiny; nejde o skutečné ani odhadované výsledky.</p>"
+        if is_simulation
+        else f'<p class="muted">{_NO_CANDIDATE_VOTES}</p>'
         if all(candidate.votes is None for candidate in candidates)
         else ""
     )
     sections = []
-    for party in snapshot.party_results:
+    for party_index, party in enumerate(snapshot.party_results):
         party_candidates = candidates_for_party(party, candidates)
+        if is_simulation and party_index < len(simulation_groups):
+            party_candidates = _with_simulated_votes(
+                simulation_groups[party_index], party.votes, party_index
+            )
         if not party_candidates:
             continue
         prefix = f"Obvod {party.constituency_id} · " if has_districts else ""
@@ -499,6 +505,60 @@ def _candidates_html(snapshot: ElectionSnapshot, has_districts: bool) -> str:
             f"<tbody>{rows}</tbody></table></div></details>"
         )
     return note + "".join(sections)
+
+
+def _tracked_municipality_html(item: sqlite3.Row) -> str:
+    snapshot = polling_service.repository.get_latest_snapshot(item["code"])
+    if snapshot is None:
+        progress = "Výsledky zatím nejsou dostupné."
+    else:
+        progress = (
+            f'Okrsky: {snapshot.progress.processed_districts} / '
+            f'{snapshot.progress.total_districts}'
+        )
+    code = escape(item["code"], quote=True)
+    return (
+        f'<li><span><a class="tracked-link" href="/vysledky/{code}">'
+        f"<strong>{escape(_council_label(item))}</strong></a>"
+        f'<br><span class="muted">{escape(item["district_name"])} · '
+        f"{escape(item['region_name'])}</span>"
+        f'<br><span class="muted">{escape(progress)} · '
+        f"{escape(_tracking_label(item))}</span></span>"
+        f'<form action="/sledovani/{code}/odebrat" method="post">'
+        '<button class="remove-button" type="submit">Přestat sledovat</button></form></li>'
+    )
+
+
+def _candidate_groups(candidates: list[Candidate]) -> list[list[Candidate]]:
+    groups: dict[tuple[str, str], list[Candidate]] = {}
+    for candidate in candidates:
+        groups.setdefault((candidate.constituency_id, candidate.list_id), []).append(candidate)
+    return [
+        sorted(group, key=lambda candidate: candidate.order)
+        for _, group in sorted(groups.items(), key=lambda item: (item[0][0], int(item[0][1])))
+    ]
+
+
+def _with_simulated_votes(
+    candidates: list[Candidate], party_votes: int, party_index: int
+) -> list[Candidate]:
+    weights = [100 + ((candidate.order * 17 + party_index * 29) % 51) for candidate in candidates]
+    total_weight = sum(weights)
+    votes = [party_votes * weight // total_weight for weight in weights]
+    votes[0] += party_votes - sum(votes)
+    return [
+        Candidate(
+            constituency_id=candidate.constituency_id,
+            list_id=candidate.list_id,
+            order=candidate.order,
+            name=candidate.name,
+            age=candidate.age,
+            occupation=candidate.occupation,
+            residence=candidate.residence,
+            votes=votes[index],
+        )
+        for index, candidate in enumerate(candidates)
+    ]
 
 
 def _valid_code(code: str) -> bool:
@@ -586,9 +646,17 @@ def development(code: str, okrsky: int | None = None) -> HTMLResponse:
         composition_html = (
             f'<p class="alert">Kandidáty se nepodařilo načíst: {escape(candidate_error)}</p>'
         )
+        candidate_results_html = ""
     else:
         composition_html = _composition_html(
             by_processed, steps, selected, candidates, has_districts, total, code
+        )
+        selected_snapshot = by_processed[selected]
+        candidate_results_html = (
+            "<h2>Hlasy jednotlivých kandidátů</h2>"
+            + _candidates_html(selected_snapshot, has_districts, candidates)
+            if selected_snapshot.source_url.startswith("SIMULATION://")
+            else ""
         )
 
     body = f"""
@@ -600,6 +668,7 @@ def development(code: str, okrsky: int | None = None) -> HTMLResponse:
       {"".join(charts)}
       <h2>Složení zastupitelstva jmenovitě</h2>
       {composition_html}
+      {candidate_results_html}
     </section>
     """
     path = f"/vysledky/{code}/vyvoj" + (f"?okrsky={okrsky}" if okrsky is not None else "")

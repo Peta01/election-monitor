@@ -126,6 +126,7 @@ def test_home_lists_tracked_municipalities_and_can_stop_tracking(
 ) -> None:
     repository = Repository(tmp_path / "elections.sqlite3")
     repository.add_tracked_municipality(_option())
+    repository.save_snapshot(_snapshot())
     monkeypatch.setattr(municipalities, "get_municipalities", lambda: [_option()])
     monkeypatch.setattr(
         web,
@@ -140,6 +141,7 @@ def test_home_lists_tracked_municipalities_and_can_stop_tracking(
     assert "Sledované obce (1)" in response.text
     assert "Přestat sledovat" in response.text
     assert 'href="/vysledky/123456"' in response.text
+    assert "Okrsky: 3 / 3" in response.text
     assert removed.status_code == 303
     assert repository.list_tracked_municipalities() == []
 
@@ -193,6 +195,46 @@ def test_results_list_candidates_and_link_to_development(tmp_path, monkeypatch) 
 
     assert "Kandidát 2" in response.text
     assert 'href="/vysledky/123456/vyvoj"' in response.text
+
+
+def test_simulated_candidate_votes_are_displayed_as_synthetic(monkeypatch) -> None:
+    snapshot = _snapshot()
+    snapshot.source_url = "SIMULATION://123456/district/1"
+    candidates = [
+        Candidate("0", "90", order, f"Kandidát {order}", 40, "učitel", "Testov")
+        for order in (1, 2, 3)
+    ]
+    monkeypatch.setattr(web, "_load_candidates", lambda _code: (candidates, None))
+
+    html = web._candidates_html(snapshot, has_districts=False)
+
+    assert "v simulaci uměle rozděleny" in html
+    assert "skutečné ani odhadované výsledky" in html
+    assert ">34</td>" in html
+    assert ">38</td>" in html
+    assert ">28</td>" in html
+    assert "Kandidát 1" in html
+    assert ">—</td>" not in html
+
+
+def test_development_page_shows_candidate_votes_for_simulation(
+    tmp_path, monkeypatch
+) -> None:
+    repository = Repository(tmp_path / "elections.sqlite3")
+    repository.add_tracked_municipality(_option())
+    snapshot = _snapshot()
+    snapshot.source_url = "SIMULATION://123456/district/3"
+    repository.save_snapshot(snapshot)
+    monkeypatch.setattr(web, "polling_service", PollingService(repository))
+
+    response = TestClient(web.app).get("/vysledky/123456/vyvoj")
+
+    assert response.status_code == 200
+    assert "Hlasy jednotlivých kandidátů" in response.text
+    assert "v simulaci uměle rozděleny" in response.text
+    assert ">34</td>" in response.text
+    assert ">38</td>" in response.text
+    assert ">28</td>" in response.text
 
 
 def test_development_page_shows_charts_and_named_composition(tmp_path, monkeypatch) -> None:
