@@ -197,6 +197,29 @@ def test_results_list_candidates_and_link_to_development(tmp_path, monkeypatch) 
     assert 'href="/vysledky/123456/vyvoj"' in response.text
 
 
+def test_results_show_simulated_candidate_votes_separately_from_live_results(
+    tmp_path, monkeypatch
+) -> None:
+    repository = Repository(tmp_path / "elections.sqlite3")
+    repository.add_tracked_municipality(_option())
+    simulated = _snapshot()
+    simulated.source_url = "SIMULATION://123456/district/3"
+    simulated.progress = PollingProgress(2, 3, 40.0)
+    repository.save_snapshot(simulated)
+    repository.save_snapshot(_snapshot())
+    monkeypatch.setattr(web, "polling_service", PollingService(repository))
+
+    response = TestClient(web.app).get("/vysledky/123456")
+
+    assert response.status_code == 200
+    assert "Hlasy kandidátů – testovací simulace" in response.text
+    assert "Syntetický stav: 2 / 3 okrsků" in response.text
+    assert "Tato čísla nejsou skutečné výsledky ČSÚ." in response.text
+    assert ">34</td>" in response.text
+    assert ">38</td>" in response.text
+    assert ">28</td>" in response.text
+
+
 def test_simulated_candidate_votes_are_displayed_as_synthetic(monkeypatch) -> None:
     snapshot = _snapshot()
     snapshot.source_url = "SIMULATION://123456/district/1"
@@ -255,6 +278,9 @@ def test_development_page_shows_charts_and_named_composition(tmp_path, monkeypat
     assert latest.text.count("<svg") == 2
     assert "Kandidát 3" in latest.text
     assert "Změny složení v čase" in latest.text
+    assert "<th>Zastupitel</th>" in latest.text
+    assert "Nový zastupitel" in latest.text
+    assert "<td>3 / 3</td><td>Nový zastupitel</td><td>Kandidát 3" in latest.text
     assert 'url=/vysledky/123456/vyvoj?okrsky=1"' in early_page.text
     early_table = early_page.text.split("<tbody>")[1]
     assert "Kandidát 2" in early_table

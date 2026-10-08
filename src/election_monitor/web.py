@@ -379,6 +379,27 @@ def _results_page(
             f'<tr><td colspan="{columns}">'
             "ČSÚ zatím nezveřejnil výsledky kandidátních listin.</td></tr>"
         )
+    candidates_html = _candidates_html(snapshot, has_districts)
+    if not snapshot.source_url.startswith("SIMULATION://"):
+        simulation_snapshot = next(
+            (
+                item
+                for item in reversed(
+                    polling_service.repository.list_snapshots(snapshot.municipality.code)
+                )
+                if item.source_url.startswith("SIMULATION://")
+            ),
+            None,
+        )
+        if simulation_snapshot is not None:
+            candidates_html += (
+                "<h3>Hlasy kandidátů – testovací simulace</h3>"
+                f'<p class="muted">Syntetický stav: '
+                f'{simulation_snapshot.progress.processed_districts} / '
+                f'{simulation_snapshot.progress.total_districts} okrsků. '
+                "Tato čísla nejsou skutečné výsledky ČSÚ.</p>"
+                + _candidates_html(simulation_snapshot, has_districts)
+            )
 
     allocation_note = ""
     poll_error = tracking["last_error"]
@@ -431,7 +452,7 @@ def _results_page(
         </table>
       </div>
       <h2>Kandidáti</h2>
-      {_candidates_html(snapshot, has_districts)}
+      {candidates_html}
       <p class="actions"><a class="button" href="/vysledky/{snapshot.municipality.code}/vyvoj">
         Vývoj výsledků a složení zastupitelstva →</a></p>
     </section>
@@ -733,19 +754,26 @@ def _composition_html(
         for seat in current_seats:
             key = (seat.constituency_id, seat.candidate.list_id, seat.candidate.order)
             current.add(key)
-            names[key] = f"{seat.candidate.name} ({seat.party_name})"
-        if previous is not None and current != previous:
-            added = ", ".join(escape(names[key]) for key in sorted(current - previous))
-            removed = ", ".join(escape(names[key]) for key in sorted(previous - current))
-            changes.append(
-                f"<tr><td>{step} / {total}</td><td>{added or '—'}</td>"
-                f"<td>{removed or '—'}</td></tr>"
+            names[key] = (
+                f"{seat.candidate.name} — {seat.party_name} "
+                f"(pořadí {seat.candidate.order})"
             )
+        if previous is not None and current != previous:
+            for change_type, members in (
+                ("Nový zastupitel", sorted(current - previous)),
+                ("Vypadl", sorted(previous - current)),
+            ):
+                if members:
+                    changes.extend(
+                        f'<tr><td>{step} / {total}</td>'
+                        f"<td>{change_type}</td><td>{escape(names[key])}</td></tr>"
+                        for key in members
+                    )
         previous = current
     history = (
         "<h3>Změny složení v čase</h3>"
-        '<div class="table-wrap"><table><thead><tr><th>Okrsků</th><th>Noví zastupitelé</th>'
-        f"<th>Vypadlí</th></tr></thead><tbody>{''.join(changes)}</tbody></table></div>"
+        '<div class="table-wrap"><table><thead><tr><th>Okrsků</th><th>Změna</th>'
+        f"<th>Zastupitel</th></tr></thead><tbody>{''.join(changes)}</tbody></table></div>"
         if changes
         else '<p class="muted">Složení se zatím v čase nezměnilo.</p>'
     )
