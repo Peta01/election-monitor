@@ -1,6 +1,6 @@
 # election-monitor
 
-Pythonová aplikace pro stahování otevřených dat o volbách do zastupitelstev obcí, ukládání průběžných výsledků do SQLite a jejich zobrazení v časové řadě.
+Pythonová aplikace pro sledování otevřených dat ČSÚ o volbách do zastupitelstev obcí, ukládání výsledků do SQLite a jejich přehledné zobrazení. **Aktuální verze: 0.2.0.**
 
 ## Lokální spuštění
 
@@ -21,7 +21,7 @@ Po spuštění aplikace otevře prohlížeč na místní stránce s kaskádovým
 
 V horní části stránky lze přepínat světlý a tmavý režim. Volba se uloží v prohlížeči a zůstane zachována i po automatickém obnovení výsledků.
 
-Přidělování mandátů volebním stranám se počítá podle § 45 odst. 1 a 2 zákona č. 491/2001 Sb. Aplikace zohledňuje kandidátně upravenou hranici, její případné snižování a přidělování mandátů pomocí d'Hondtových podílů. Výpočet se provádí samostatně pro každý volební obvod. Pokud zákonné pravidlo vyžaduje los, aplikace na to upozorní a pořadí kódů kandidátních listin použije pouze pro deterministický náhled. Pořadí konkrétních kandidátů se určuje orientačně podle lístku (§ 45 odst. 3); přeřazení podle hlasů kandidátů (odst. 4) se použije, jakmile je zdroj poskytne, náhradníci (odst. 5) zatím implementováni nejsou. Detail obce obsahuje seznam kandidátů z registru ČSÚ a stránku `/vysledky/{kód}/vyvoj` s grafy v čase a jmenovitým složením zastupitelstva.
+Přidělování mandátů volebním stranám se počítá podle § 45 odst. 1 a 2 zákona č. 491/2001 Sb. Aplikace zohledňuje kandidátně upravenou hranici, její případné snižování a přidělování mandátů pomocí d'Hondtových podílů. Výpočet se provádí samostatně pro každý volební obvod. Po dokončení zpracování obecních výsledků zobrazuje oficiální jména zvolených zastupitelů a jejich hlasy z výsledkového XML ČSÚ. Pokud zákonné pravidlo vyžaduje los, aplikace na to upozorní. Stránka `/vysledky/{kód}/vyvoj` obsahuje vývoj výsledků a jmenovité složení zastupitelstva.
 
 ## Funkce
 
@@ -29,3 +29,5 @@ Přidělování mandátů volebním stranám se počítá podle § 45 odst. 1 a 
 - Ukládat průběžné výsledky do SQLite
 - Zobrazovat aktuální výsledky a průběh zpracování
 - Zobrazovat virtuální rozdělení mandátů mezi volební strany
+- Zobrazovat zvolené zastupitele a jejich oficiální počty hlasů
+- Vytvářet pro každou dokončenou sledovanou obec samostatnou prezentaci výsledků ve formátu A4 PDF
