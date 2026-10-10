@@ -15,7 +15,10 @@ XML = b"""<?xml version="1.0" encoding="utf-8"?>
       <UCAST OKRSKY_CELKEM="4" OKRSKY_ZPRAC="3" UCAST_PROC="42.50"
           PLATNE_HLASY="1250"/>
       <VOLEBNI_STRANA VSTRANA="12" NAZEV_STRANY="Testovac&#237; strana"
-          HLASY="1250" HLASY_PROC="100.00" KANDIDATU_POCET="3"/>
+          HLASY="1250" HLASY_PROC="100.00" KANDIDATU_POCET="3">
+        <ZASTUPITEL PORADOVE_CISLO="2" JMENO="Eva" PRIJMENI="Nov&#225;kov&#225;"
+            TITULPRED="Ing." TITULZA="Ph.D." HLASY="456" HLASY_PROC="36.48"/>
+      </VOLEBNI_STRANA>
     </VYSLEDEK>
   </OBEC>
 </VYSLEDKY_OBEC>
@@ -47,6 +50,16 @@ def test_parse_council_results() -> None:
     assert snapshot.party_results[0].votes == 1250
     assert snapshot.party_results[0].percent == 100
     assert snapshot.party_results[0].candidate_count == 3
+    assert len(snapshot.elected_representatives) == 1
+    representative = snapshot.elected_representatives[0]
+    assert (representative.list_id, representative.party_name) == (
+        "12",
+        "Testovací strana",
+    )
+    assert representative.order == 2
+    assert representative.name == "Ing. Eva Nováková, Ph.D."
+    assert representative.votes == 456
+    assert representative.percent == 36.48
 
 
 def test_parse_electoral_districts_separately() -> None:
@@ -147,6 +160,41 @@ def test_save_parsed_snapshot_to_sqlite(tmp_path) -> None:
 
     assert stored_snapshot == (3, 4, 3, 5, 1)
     assert stored_party == ("12", "Testovací strana", 1250, 3, "0")
+    assert repo.get_latest_snapshot("123456").elected_representatives == (
+        snapshot.elected_representatives
+    )
+
+
+def test_new_candidate_votes_are_saved_even_when_precinct_count_is_unchanged(
+    tmp_path,
+) -> None:
+    snapshot = ElectionParser().parse(
+        XML,
+        municipality_code="123456",
+        source_url="https://example.test/results.xml",
+        source_hash="before-final-results",
+    )
+    snapshot.progress.processed_districts = 4
+    snapshot.progress.total_districts = 4
+    snapshot.elected_representatives.clear()
+    repository = Repository(tmp_path / "election.sqlite3")
+    first_id = repository.save_snapshot(snapshot)
+
+    snapshot.elected_representatives.append(
+        ElectionParser()
+        .parse(
+            XML,
+            municipality_code="123456",
+            source_url="https://example.test/results.xml",
+            source_hash="final",
+        )
+        .elected_representatives[0]
+    )
+    snapshot.source_hash = "final-results-with-candidate-votes"
+    final_id = repository.save_snapshot(snapshot)
+
+    assert final_id != first_id
+    assert repository.get_latest_snapshot("123456").elected_representatives[0].votes == 456
 
 
 def test_migrates_existing_database_schema(tmp_path) -> None:

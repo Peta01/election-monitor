@@ -3,10 +3,11 @@ from __future__ import annotations
 import sqlite3
 from contextlib import asynccontextmanager
 from html import escape
+from pathlib import Path
 
 import requests
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from . import municipalities
 from .candidates import Candidate, get_candidates
@@ -305,6 +306,23 @@ def remove_municipality(code: str) -> RedirectResponse:
     return RedirectResponse("/", status_code=303)
 
 
+@app.get("/prezentace/{code}")
+def presentation(code: str) -> Response:
+    if not _valid_code(code):
+        raise HTTPException(status_code=404, detail="Prezentace není dostupná.")
+    generated = polling_service.repository.get_presentation(code)
+    if generated is None:
+        raise HTTPException(status_code=404, detail="Prezentace ještě nebyla vytvořena.")
+    path = Path(generated["file_path"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Soubor prezentace není dostupný.")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=f"vysledky-{code}.pdf",
+    )
+
+
 @app.get("/vysledky/{code}", response_class=HTMLResponse)
 def results(code: str) -> HTMLResponse:
     if len(code) != 6 or not code.isascii() or not code.isdigit():
@@ -424,6 +442,21 @@ def _results_page(
             f"{snapshot.threshold_percent} %.</p>"
         )
 
+    presentation_link = ""
+    generated_presentation = polling_service.repository.get_presentation(
+        snapshot.municipality.code
+    )
+    if (
+        processed == total
+        and total > 0
+        and generated_presentation is not None
+        and Path(generated_presentation["file_path"]).is_file()
+    ):
+        presentation_link = (
+            f'<a class="button" href="/prezentace/{snapshot.municipality.code}">'
+            "Stáhnout prezentaci A4 (PDF)</a>"
+        )
+
     body = f"""
     <section class="card">
       <p><a href="/">← Změnit obec</a></p>
@@ -454,7 +487,7 @@ def _results_page(
       <h2>Kandidáti</h2>
       {candidates_html}
       <p class="actions"><a class="button" href="/vysledky/{snapshot.municipality.code}/vyvoj">
-        Vývoj výsledků a složení zastupitelstva →</a></p>
+        Vývoj výsledků a složení zastupitelstva →</a>{presentation_link}</p>
     </section>
     """
     return _page(title, body, refresh_code=snapshot.municipality.code)
@@ -481,15 +514,33 @@ def _candidates_html(
     if candidates is None:
         candidates, error = _load_candidates(snapshot.municipality.code)
         if error:
+            if snapshot.elected_representatives:
+                return (
+                    f'<p class="alert">Kandidáty se nepodařilo načíst: {escape(error)}</p>'
+                    + _official_elected_html(snapshot, has_districts)
+                )
             return f'<p class="alert">Kandidáty se nepodařilo načíst: {escape(error)}</p>'
     if not candidates:
         return '<p class="muted">Registr ČSÚ pro toto zastupitelstvo neobsahuje kandidáty.</p>'
     is_simulation = snapshot.source_url.startswith("SIMULATION://")
     simulation_groups = _candidate_groups(candidates) if is_simulation else []
+    official_candidate_votes = {
+        (
+            representative.constituency_id,
+            representative.list_id,
+            representative.order,
+        ): representative.votes
+        for representative in snapshot.elected_representatives
+    }
     note = (
         '<p class="muted">Hlasy kandidátů jsou v simulaci uměle rozděleny v rámci '
         "hlasů kandidátní listiny; nejde o skutečné ani odhadované výsledky.</p>"
         if is_simulation
+        else (
+            '<p class="muted">Hlasy zvolených zastupitelů jsou převzaty z oficiálního '
+            "XML ČSÚ; u ostatních kandidátů nejsou v tomto zdroji uvedeny.</p>"
+        )
+        if snapshot.elected_representatives
         else f'<p class="muted">{_NO_CANDIDATE_VOTES}</p>'
         if all(candidate.votes is None for candidate in candidates)
         else ""
@@ -504,18 +555,22 @@ def _candidates_html(
         if not party_candidates:
             continue
         prefix = f"Obvod {party.constituency_id} · " if has_districts else ""
-        rows = "".join(
-            "<tr>"
-            f'<td class="numeric">{candidate.order}</td>'
-            f"<td>{escape(candidate.name)}</td>"
-            f'<td class="numeric">{candidate.age if candidate.age is not None else "—"}</td>'
-            f"<td>{escape(candidate.occupation)}</td>"
-            f"<td>{escape(candidate.residence)}</td>"
-            f'<td class="numeric">'
-            f'{_number(candidate.votes) if candidate.votes is not None else "—"}</td>'
-            "</tr>"
-            for candidate in sorted(party_candidates, key=lambda item: item.order)
-        )
+        rows = ""
+        for candidate in sorted(party_candidates, key=lambda item: item.order):
+            official_votes = official_candidate_votes.get(
+                (party.constituency_id, party.list_id, candidate.order)
+            )
+            votes = official_votes if official_votes is not None else candidate.votes
+            rows += (
+                "<tr>"
+                f'<td class="numeric">{candidate.order}</td>'
+                f"<td>{escape(candidate.name)}</td>"
+                f'<td class="numeric">{candidate.age if candidate.age is not None else "—"}</td>'
+                f"<td>{escape(candidate.occupation)}</td>"
+                f"<td>{escape(candidate.residence)}</td>"
+                f'<td class="numeric">{_number(votes) if votes is not None else "—"}</td>'
+                "</tr>"
+            )
         sections.append(
             f"<details><summary>{escape(prefix + party.name)} "
             f"({len(party_candidates)} kandidátů)</summary>"
@@ -528,6 +583,32 @@ def _candidates_html(
     return note + "".join(sections)
 
 
+def _official_elected_html(snapshot: ElectionSnapshot, has_districts: bool) -> str:
+    if not snapshot.elected_representatives:
+        return ""
+    district_heading = "<th>Obvod</th>" if has_districts else ""
+    rows = "".join(
+        "<tr>"
+        + (
+            f"<td>Obvod {escape(representative.constituency_id)}</td>"
+            if has_districts
+            else ""
+        )
+        + f"<td>{escape(representative.name)}</td>"
+        + f"<td>{escape(representative.party_name)}</td>"
+        + f'<td class="numeric">{_number(representative.votes)}</td>'
+        + "</tr>"
+        for representative in snapshot.elected_representatives
+    )
+    return (
+        '<h3>Zvolení zastupitelé a jejich hlasy z oficiálního XML ČSÚ</h3>'
+        '<div class="table-wrap"><table><thead><tr>'
+        f"{district_heading}<th>Jméno</th><th>Kandidátní listina</th>"
+        '<th class="numeric">Hlasy</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>"
+    )
+
+
 def _tracked_municipality_html(item: sqlite3.Row) -> str:
     snapshot = polling_service.repository.get_latest_snapshot(item["code"])
     if snapshot is None:
@@ -538,13 +619,19 @@ def _tracked_municipality_html(item: sqlite3.Row) -> str:
             f'{snapshot.progress.total_districts}'
         )
     code = escape(item["code"], quote=True)
+    generated = polling_service.repository.get_presentation(item["code"])
+    presentation_link = (
+        f' · <a href="/prezentace/{code}">Stáhnout prezentaci A4 (PDF)</a>'
+        if generated is not None and Path(generated["file_path"]).is_file()
+        else ""
+    )
     return (
         f'<li><span><a class="tracked-link" href="/vysledky/{code}">'
         f"<strong>{escape(_council_label(item))}</strong></a>"
         f'<br><span class="muted">{escape(item["district_name"])} · '
         f"{escape(item['region_name'])}</span>"
         f'<br><span class="muted">{escape(progress)} · '
-        f"{escape(_tracking_label(item))}</span></span>"
+        f"{escape(_tracking_label(item))}{presentation_link}</span></span>"
         f'<form action="/sledovani/{code}/odebrat" method="post">'
         '<button class="remove-button" type="submit">Přestat sledovat</button></form></li>'
     )

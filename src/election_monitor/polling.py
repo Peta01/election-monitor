@@ -4,14 +4,21 @@ import logging
 import sqlite3
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 import requests
 
 from .app import fetch_current_snapshot
-from .config import DB_PATH, DEFAULT_POLL_INTERVAL_SECONDS
+from .candidates import Candidate, get_candidates
+from .config import DB_PATH, DEFAULT_POLL_INTERVAL_SECONDS, PRESENTATIONS_DIR
 from .db import Repository
+from .models import ElectionSnapshot
 from .municipalities import MunicipalityOption
 from .parser import ParserError
+from .presentations import (
+    PRESENTATION_FORMAT_VERSION,
+    generate_election_presentation,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,13 +29,22 @@ class PollingService:
         repository: Repository | None = None,
         fetch_snapshot: Callable = fetch_current_snapshot,
         interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
+        presentation_generator: Callable[[ElectionSnapshot, Path], None] = (
+            generate_election_presentation
+        ),
+        candidate_loader: Callable[[str], list[Candidate]] = get_candidates,
+        presentations_dir: Path = PRESENTATIONS_DIR,
     ) -> None:
         self.repository = repository or Repository(DB_PATH)
         self.fetch_snapshot = fetch_snapshot
         self.interval_seconds = interval_seconds
+        self.presentation_generator = presentation_generator
+        self.candidate_loader = candidate_loader
+        self.presentations_dir = presentations_dir
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._presentation_lock = threading.Lock()
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -74,10 +90,56 @@ class PollingService:
                 continue
 
             try:
-                self.repository.save_snapshot(snapshot)
+                snapshot_id = self.repository.save_snapshot(snapshot)
                 self.repository.update_poll_success(code)
             except (OSError, sqlite3.Error):
                 LOGGER.exception("Database operation failed while polling %s", code)
+                continue
+
+            progress = snapshot.progress
+            if (
+                progress.total_districts > 0
+                and progress.processed_districts == progress.total_districts
+                and not snapshot.source_url.startswith("SIMULATION://")
+            ):
+                self._create_presentation(code, snapshot_id, snapshot)
+
+    def _create_presentation(
+        self, code: str, snapshot_id: int, snapshot: ElectionSnapshot
+    ) -> None:
+        with self._presentation_lock:
+            try:
+                candidate_votes_available = any(
+                    representative.votes is not None
+                    for representative in snapshot.elected_representatives
+                )
+                if not candidate_votes_available:
+                    candidates = self.candidate_loader(code)
+                    candidate_votes_available = any(
+                        candidate.votes is not None for candidate in candidates
+                    )
+                existing = self.repository.get_presentation(code)
+                if (
+                    existing is not None
+                    and existing["format_version"] >= PRESENTATION_FORMAT_VERSION
+                    and Path(existing["file_path"]).is_file()
+                    and (
+                        existing["candidate_votes_available"]
+                        or not candidate_votes_available
+                    )
+                ):
+                    return
+                output_path = self.presentations_dir / f"{code}.pdf"
+                self.presentation_generator(snapshot, output_path)
+                self.repository.save_presentation(
+                    code,
+                    snapshot_id,
+                    output_path,
+                    PRESENTATION_FORMAT_VERSION,
+                    candidate_votes_available,
+                )
+            except Exception:
+                LOGGER.exception("Could not generate election presentation for %s", code)
 
     def _save_failure(self, code: str, exc: Exception) -> None:
         try:

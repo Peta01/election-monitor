@@ -14,11 +14,15 @@ def _xml(votes_1: int, votes_2: int) -> bytes:
 <VYSLEDEK><UCAST OKRSKY_CELKEM="4" OKRSKY_ZPRAC="0" UCAST_PROC="0.00" PLATNE_HLASY="0"/></VYSLEDEK>
 <OBVOD CIS_OBVODU="1" VOLENO_ZASTUP="15"><VYSLEDEK>
 <UCAST OKRSKY_CELKEM="4" OKRSKY_ZPRAC="0" UCAST_PROC="0.00" PLATNE_HLASY="{votes_1}"/>
-<VOLEBNI_STRANA VSTRANA="1" NAZEV_STRANY="A" HLASY="{votes_1}" HLASY_PROC="0" KANDIDATU_POCET="15"/>
+<VOLEBNI_STRANA VSTRANA="1" NAZEV_STRANY="A" HLASY="{votes_1}" HLASY_PROC="0" KANDIDATU_POCET="15">
+<ZASTUPITEL PORADOVE_CISLO="1" JMENO="Kandid&#225;t" PRIJMENI="Jeden" HLASY="{votes_1}" HLASY_PROC="100"/>
+</VOLEBNI_STRANA>
 </VYSLEDEK></OBVOD>
 <OBVOD CIS_OBVODU="2" VOLENO_ZASTUP="6"><VYSLEDEK>
 <UCAST OKRSKY_CELKEM="4" OKRSKY_ZPRAC="0" UCAST_PROC="0.00" PLATNE_HLASY="{votes_2}"/>
-<VOLEBNI_STRANA VSTRANA="1" NAZEV_STRANY="A" HLASY="{votes_2}" HLASY_PROC="0" KANDIDATU_POCET="6"/>
+<VOLEBNI_STRANA VSTRANA="1" NAZEV_STRANY="A" HLASY="{votes_2}" HLASY_PROC="0" KANDIDATU_POCET="6">
+<ZASTUPITEL PORADOVE_CISLO="2" JMENO="Kandid&#225;t" PRIJMENI="Dva" HLASY="{votes_2}" HLASY_PROC="100"/>
+</VOLEBNI_STRANA>
 </VYSLEDEK></OBVOD>
 </OBEC></VYSLEDKY_OBEC>""".encode()
 
@@ -44,3 +48,7 @@ def test_district_files_are_merged_by_file_number(monkeypatch) -> None:
     votes = {party.constituency_id: party.votes for party in snapshot.party_results}
     assert votes == {"1": 0, "2": 0}
     assert snapshot.valid_votes_by_constituency == {"1": 0, "2": 0}
+    assert [
+        (representative.constituency_id, representative.name, representative.votes)
+        for representative in snapshot.elected_representatives
+    ] == [("1", "Kandidát Jeden", 0), ("2", "Kandidát Dva", 0)]

@@ -47,10 +47,26 @@ def _fetch_district_snapshot(
         ] + [
             party for party in district.party_results if party.constituency_id == district_id
         ]
+        snapshot.elected_representatives = [
+            representative
+            for representative in snapshot.elected_representatives
+            if representative.constituency_id != district_id
+        ] + [
+            representative
+            for representative in district.elected_representatives
+            if representative.constituency_id == district_id
+        ]
         snapshot.valid_votes_by_constituency[district_id] = (
             district.valid_votes_by_constituency.get(district_id, 0)
         )
     snapshot.party_results.sort(key=lambda party: int(party.constituency_id))
+    snapshot.elected_representatives.sort(
+        key=lambda representative: (
+            int(representative.constituency_id),
+            int(representative.list_id),
+            representative.order,
+        )
+    )
     snapshot.source_hash = hashlib.sha256("".join(hashes).encode()).hexdigest()
     return snapshot
 

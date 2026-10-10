@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import requests
 
-from .config import CANDIDATES_CACHE_PATH, COUNCIL_REGISTRY_CACHE_SECONDS
+from .config import CANDIDATES_CACHE_PATH, CANDIDATES_CACHE_SECONDS
 from .municipalities import RegistryError, download_registry_archive
 
 
@@ -111,7 +111,7 @@ def _candidate(row: dict[str, str | None]) -> tuple[Candidate, int]:
 def _read_registry_csv() -> bytes:
     path = CANDIDATES_CACHE_PATH
     try:
-        fresh = time.time() - path.stat().st_mtime < COUNCIL_REGISTRY_CACHE_SECONDS
+        fresh = time.time() - path.stat().st_mtime < CANDIDATES_CACHE_SECONDS
     except OSError:
         fresh = False
     if fresh:

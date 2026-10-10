@@ -8,6 +8,7 @@ from election_monitor import municipalities, web
 from election_monitor.candidates import Candidate
 from election_monitor.db import Repository
 from election_monitor.models import (
+    ElectedRepresentative,
     ElectionSnapshot,
     MunicipalityRef,
     PartyResult,
@@ -195,6 +196,72 @@ def test_results_list_candidates_and_link_to_development(tmp_path, monkeypatch) 
 
     assert "Kandidát 2" in response.text
     assert 'href="/vysledky/123456/vyvoj"' in response.text
+
+
+def test_results_show_official_votes_for_elected_candidates(tmp_path, monkeypatch) -> None:
+    repository = Repository(tmp_path / "elections.sqlite3")
+    repository.add_tracked_municipality(_option())
+    snapshot = _snapshot()
+    snapshot.elected_representatives = [
+        ElectedRepresentative("0", "1", "Testovací kandidátka", 2, "Kandidát 2", 1234, 12.5)
+    ]
+    repository.save_snapshot(snapshot)
+    monkeypatch.setattr(web, "polling_service", PollingService(repository))
+
+    response = TestClient(web.app).get("/vysledky/123456")
+
+    assert response.status_code == 200
+    assert "1\u00a0234" in response.text
+    assert "Hlasy zvolených zastupitelů jsou převzaty z oficiálního XML ČSÚ" in response.text
+    assert "u ostatních kandidátů nejsou v tomto zdroji uvedeny" in response.text
+
+
+def test_results_show_official_elected_votes_when_candidate_registry_is_unavailable(
+    tmp_path, monkeypatch
+) -> None:
+    repository = Repository(tmp_path / "elections.sqlite3")
+    repository.add_tracked_municipality(_option())
+    snapshot = _snapshot()
+    snapshot.elected_representatives = [
+        ElectedRepresentative("0", "1", "Testovací kandidátka", 2, "Kandidát 2", 1234)
+    ]
+    repository.save_snapshot(snapshot)
+    monkeypatch.setattr(
+        web,
+        "get_candidates",
+        lambda _code: (_ for _ in ()).throw(requests.ConnectionError("offline")),
+    )
+    monkeypatch.setattr(web, "polling_service", PollingService(repository))
+
+    response = TestClient(web.app).get("/vysledky/123456")
+
+    assert response.status_code == 200
+    assert "Kandidáty se nepodařilo načíst: offline" in response.text
+    assert "Kandidát 2" in response.text
+    assert "1\u00a0234" in response.text
+
+
+def test_completed_results_link_to_saved_a4_pdf(tmp_path, monkeypatch) -> None:
+    repository = Repository(tmp_path / "elections.sqlite3")
+    repository.add_tracked_municipality(_option())
+    repository.save_snapshot(_snapshot())
+    pdf_path = tmp_path / "presentations" / "123456.pdf"
+    pdf_path.parent.mkdir()
+    pdf_path.write_bytes(b"%PDF-test")
+    latest = repository.get_latest_snapshot("123456")
+    snapshot_id = repository.save_snapshot(latest)
+    repository.save_presentation("123456", snapshot_id, pdf_path)
+    monkeypatch.setattr(web, "polling_service", PollingService(repository))
+
+    with TestClient(web.app) as client:
+        page = client.get("/vysledky/123456")
+        download = client.get("/prezentace/123456")
+
+    assert 'href="/prezentace/123456"' in page.text
+    assert "Stáhnout prezentaci A4 (PDF)" in page.text
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "application/pdf"
+    assert download.content == b"%PDF-test"
 
 
 def test_results_show_simulated_candidate_votes_separately_from_live_results(

@@ -3,7 +3,13 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
-from .models import ElectionSnapshot, MunicipalityRef, PartyResult, PollingProgress
+from .models import (
+    ElectedRepresentative,
+    ElectionSnapshot,
+    MunicipalityRef,
+    PartyResult,
+    PollingProgress,
+)
 
 
 class ParserError(RuntimeError):
@@ -80,6 +86,7 @@ class ElectionParser:
             result_elements = [("0", result_node)]
 
         party_results: list[PartyResult] = []
+        elected_representatives: list[ElectedRepresentative] = []
         valid_votes: dict[str, int] = {}
         for constituency_id, constituency_result in result_elements:
             if constituency_result is None:
@@ -95,18 +102,33 @@ class ElectionParser:
             valid_votes[constituency_id] = _integer_attribute(
                 constituency_turnout, "PLATNE_HLASY"
             )
-            party_results.extend(
-                PartyResult(
-                    list_id=_optional_attribute(party, "POR_STR_HLAS_LIST")
-                    or _required_attribute(party, "VSTRANA"),
-                    name=_required_attribute(party, "NAZEV_STRANY"),
-                    votes=_integer_attribute(party, "HLASY"),
-                    percent=_float_attribute(party, "HLASY_PROC"),
-                    candidate_count=_integer_attribute(party, "KANDIDATU_POCET"),
-                    constituency_id=constituency_id,
+            for party in _children(constituency_result, "VOLEBNI_STRANA"):
+                list_id = _optional_attribute(party, "POR_STR_HLAS_LIST") or (
+                    _required_attribute(party, "VSTRANA")
                 )
-                for party in _children(constituency_result, "VOLEBNI_STRANA")
-            )
+                party_name = _required_attribute(party, "NAZEV_STRANY")
+                party_results.append(
+                    PartyResult(
+                        list_id=list_id,
+                        name=party_name,
+                        votes=_integer_attribute(party, "HLASY"),
+                        percent=_float_attribute(party, "HLASY_PROC"),
+                        candidate_count=_integer_attribute(party, "KANDIDATU_POCET"),
+                        constituency_id=constituency_id,
+                    )
+                )
+                elected_representatives.extend(
+                    ElectedRepresentative(
+                        constituency_id=constituency_id,
+                        list_id=list_id,
+                        party_name=party_name,
+                        order=_integer_attribute(representative, "PORADOVE_CISLO"),
+                        name=_candidate_name(representative),
+                        votes=_integer_attribute(representative, "HLASY"),
+                        percent=_float_attribute(representative, "HLASY_PROC"),
+                    )
+                    for representative in _children(party, "ZASTUPITEL")
+                )
         return ElectionSnapshot(
             municipality=MunicipalityRef(code=normalized_code, name=name),
             fetched_at=fetched_at or datetime.now(UTC),
@@ -117,6 +139,7 @@ class ElectionParser:
             seats_to_elect=_integer_attribute(municipality_node, "VOLENO_ZASTUP"),
             seat_counts_by_constituency=seat_counts,
             valid_votes_by_constituency=valid_votes,
+            elected_representatives=elected_representatives,
         )
 
 
@@ -137,6 +160,20 @@ def _required_attribute(element: ET.Element, name: str) -> str:
     if value is None:
         raise ParserError(f"Missing required XML attribute: {name}")
     return value
+
+
+def _candidate_name(element: ET.Element) -> str:
+    name = " ".join(
+        value
+        for value in (
+            _optional_attribute(element, "TITULPRED") or "",
+            _required_attribute(element, "JMENO"),
+            _required_attribute(element, "PRIJMENI"),
+        )
+        if value
+    )
+    title_after = _optional_attribute(element, "TITULZA") or ""
+    return f"{name}, {title_after}" if title_after else name
 
 
 def _optional_attribute(element: ET.Element, name: str) -> str | None:

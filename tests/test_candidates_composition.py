@@ -1,5 +1,8 @@
+import io
+import zipfile
 from datetime import UTC, datetime
 
+from election_monitor import candidates
 from election_monitor.candidates import Candidate, parse_candidates_csv
 from election_monitor.composition import council_composition, rank_candidates
 from election_monitor.models import (
@@ -55,6 +58,24 @@ def test_candidates_with_ten_percent_above_average_move_first() -> None:
     ranked = rank_candidates(_party(), _candidates([10, 20, 40, 30]))
 
     assert [candidate.order for candidate in ranked] == [3, 4, 1, 2]
+
+
+def test_candidate_registry_refreshes_after_short_cache_expiry(
+    tmp_path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "kvrk.csv"
+    cache_path.write_bytes(b"old candidate data")
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("csv/kvrk.csv", b"fresh candidate data")
+    monkeypatch.setattr(candidates, "CANDIDATES_CACHE_PATH", cache_path)
+    monkeypatch.setattr(candidates, "CANDIDATES_CACHE_SECONDS", 0)
+    monkeypatch.setattr(
+        candidates, "download_registry_archive", lambda: archive.getvalue()
+    )
+
+    assert candidates._read_registry_csv() == b"fresh candidate data"
+    assert cache_path.read_bytes() == b"fresh candidate data"
 
 
 def test_council_composition_takes_mandates_in_order() -> None:

@@ -4,7 +4,13 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import ElectionSnapshot, MunicipalityRef, PartyResult, PollingProgress
+from .models import (
+    ElectedRepresentative,
+    ElectionSnapshot,
+    MunicipalityRef,
+    PartyResult,
+    PollingProgress,
+)
 from .municipalities import MunicipalityOption
 
 SCHEMA_SQL = """
@@ -44,6 +50,19 @@ CREATE TABLE IF NOT EXISTS party_results (
     FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
 );
 
+CREATE TABLE IF NOT EXISTS elected_representatives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL,
+    constituency_id TEXT NOT NULL,
+    list_id TEXT NOT NULL,
+    party_name TEXT NOT NULL,
+    candidate_order INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    votes INTEGER NOT NULL,
+    percent REAL,
+    FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
+);
+
 CREATE TABLE IF NOT EXISTS tracked_municipalities (
     code TEXT PRIMARY KEY,
     council_name TEXT NOT NULL,
@@ -56,6 +75,16 @@ CREATE TABLE IF NOT EXISTS tracked_municipalities (
     last_attempt_at TEXT,
     last_success_at TEXT,
     last_error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS presentations (
+    municipality_code TEXT PRIMARY KEY,
+    snapshot_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    format_version INTEGER NOT NULL DEFAULT 1,
+    candidate_votes_available INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
 );
 """
 
@@ -86,6 +115,15 @@ class Repository:
             self._ensure_column(
                 conn, "party_results", "constituency_id", "TEXT NOT NULL DEFAULT '0'"
             )
+            self._ensure_column(
+                conn, "presentations", "format_version", "INTEGER NOT NULL DEFAULT 1"
+            )
+            self._ensure_column(
+                conn,
+                "presentations",
+                "candidate_votes_available",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
 
     def save_snapshot(self, snapshot: ElectionSnapshot) -> int:
         with self._connect() as conn:
@@ -108,10 +146,22 @@ class Repository:
                 int(latest["processed_districts"]),
                 int(latest["total_districts"]),
                 self._list_keys(conn, int(latest["id"])),
+                self._elected_representative_keys(conn, int(latest["id"])),
             ) == (
                 snapshot.progress.processed_districts,
                 snapshot.progress.total_districts,
                 sorted((r.constituency_id, r.list_id) for r in snapshot.party_results),
+                sorted(
+                    (
+                        representative.constituency_id,
+                        representative.list_id,
+                        representative.order,
+                        representative.name,
+                        representative.votes,
+                        representative.percent,
+                    )
+                    for representative in snapshot.elected_representatives
+                ),
             ):
                 return int(latest["id"])
 
@@ -157,6 +207,25 @@ class Repository:
                         result.constituency_id,
                     ),
                 )
+            for representative in snapshot.elected_representatives:
+                conn.execute(
+                    """
+                    INSERT INTO elected_representatives (
+                        snapshot_id, constituency_id, list_id, party_name,
+                        candidate_order, name, votes, percent
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        snapshot_id,
+                        representative.constituency_id,
+                        representative.list_id,
+                        representative.party_name,
+                        representative.order,
+                        representative.name,
+                        representative.votes,
+                        representative.percent,
+                    ),
+                )
             return snapshot_id
 
     @staticmethod
@@ -166,6 +235,30 @@ class Repository:
             (snapshot_id,),
         ).fetchall()
         return sorted((row["constituency_id"], row["list_id"]) for row in rows)
+
+    @staticmethod
+    def _elected_representative_keys(
+        conn: sqlite3.Connection, snapshot_id: int
+    ) -> list[tuple[str, str, int, str, int, float | None]]:
+        rows = conn.execute(
+            """
+            SELECT constituency_id, list_id, candidate_order, name, votes, percent
+            FROM elected_representatives
+            WHERE snapshot_id = ?
+            """,
+            (snapshot_id,),
+        ).fetchall()
+        return [
+            (
+                str(row["constituency_id"]),
+                str(row["list_id"]),
+                int(row["candidate_order"]),
+                str(row["name"]),
+                int(row["votes"]),
+                row["percent"],
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _ensure_column(
@@ -299,6 +392,16 @@ class Repository:
             """,
             (row["id"],),
         ).fetchall()
+        elected = conn.execute(
+            """
+            SELECT constituency_id, list_id, party_name, candidate_order,
+                   name, votes, percent
+            FROM elected_representatives
+            WHERE snapshot_id = ?
+            ORDER BY constituency_id, CAST(list_id AS INTEGER), candidate_order
+            """,
+            (row["id"],),
+        ).fetchall()
         return ElectionSnapshot(
             municipality=MunicipalityRef(row["code"], row["name"]),
             fetched_at=datetime.fromisoformat(row["fetched_at"]),
@@ -325,6 +428,18 @@ class Repository:
             threshold_percent=row["threshold_percent"],
             lottery_required=bool(row["lottery_required"]),
             allocation_error=row["allocation_error"],
+            elected_representatives=[
+                ElectedRepresentative(
+                    constituency_id=representative["constituency_id"],
+                    list_id=representative["list_id"],
+                    party_name=representative["party_name"],
+                    order=representative["candidate_order"],
+                    name=representative["name"],
+                    votes=representative["votes"],
+                    percent=representative["percent"],
+                )
+                for representative in elected
+            ],
         )
 
     def get_tracking_status(self, code: str) -> sqlite3.Row | None:
@@ -338,6 +453,51 @@ class Repository:
                 """,
                 (code,),
             ).fetchone()
+
+    def get_presentation(self, code: str) -> sqlite3.Row | None:
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                SELECT municipality_code, snapshot_id, file_path, generated_at,
+                       format_version, candidate_votes_available
+                FROM presentations
+                WHERE municipality_code = ?
+                """,
+                (code,),
+            ).fetchone()
+
+    def save_presentation(
+        self,
+        code: str,
+        snapshot_id: int,
+        file_path: Path,
+        format_version: int = 1,
+        candidate_votes_available: bool = False,
+    ) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO presentations (
+                    municipality_code, snapshot_id, file_path, generated_at, format_version,
+                    candidate_votes_available
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(municipality_code) DO UPDATE SET
+                    snapshot_id = excluded.snapshot_id,
+                    file_path = excluded.file_path,
+                    generated_at = excluded.generated_at,
+                    format_version = excluded.format_version,
+                    candidate_votes_available = excluded.candidate_votes_available
+                """,
+                (
+                    code,
+                    snapshot_id,
+                    str(file_path),
+                    datetime.now(UTC).isoformat(),
+                    format_version,
+                    int(candidate_votes_available),
+                ),
+            )
+            return cursor.rowcount == 1
 
     def _upsert_municipality(
         self, conn: sqlite3.Connection, code: str, name: str

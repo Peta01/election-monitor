@@ -27,6 +27,17 @@ class PartyResult:
 
 
 @dataclass(slots=True)
+class ElectedRepresentative:
+    constituency_id: str
+    list_id: str
+    party_name: str
+    order: int
+    name: str
+    votes: int
+    percent: float | None = None
+
+
+@dataclass(slots=True)
 class ElectionSnapshot:
     municipality: MunicipalityRef
     fetched_at: datetime
@@ -40,3 +51,4 @@ class ElectionSnapshot:
     threshold_percent: int | None = None
     lottery_required: bool = False
     allocation_error: str | None = None
+    elected_representatives: list[ElectedRepresentative] = field(default_factory=list)

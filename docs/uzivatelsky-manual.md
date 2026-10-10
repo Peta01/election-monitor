@@ -58,6 +58,8 @@ data/election_monitor.sqlite3
 
 Na úvodní stránce se zobrazí sledované obce, čas posledního úspěšného načtení nebo případná chyba. Novou obec přidáte dalším výběrem. Tlačítkem **Přestat sledovat** ji vyřadíte z pravidelného stahování; již uložené snímky zůstanou v databázi.
 
+Jakmile ČSÚ u konkrétní sledované obce vykáže všechny okrsky jako zpracované, aplikace pro ni vytvoří samostatnou tiskovou prezentaci výsledků ve formátu A4 (PDF). Obsahuje i jmenný přehled zastupitelů podle výpočtu mandátů aplikace a pořadí kandidátů; při losu jde pouze o orientační složení. Pokud ČSÚ ještě neposkytuje hlasy jednotlivých kandidátů, PDF to výslovně uvede a místo neznámého počtu zobrazí pomlčku (nikoli nulu). Nemusíte čekat na dokončení ostatních sledovaných obcí. Odkaz **Stáhnout prezentaci A4 (PDF)** se zobrazí na stránce výsledků a v seznamu sledovaných obcí; soubor zůstává dostupný i po restartu aplikace. Pro každou obec se automaticky vytvoří jedna prezentace uložená v `data/presentations/`. Registr kandidátů se obnovuje nejvýše po hodině. Po aktualizaci aplikace se již existující prezentace dokončených sledovaných obcí automaticky přegenerují při jejich dalším úspěšném načtení.
+
 Sledování probíhá jen po dobu, kdy běží místní server. Server ukončíte zavřením okna terminálu nebo stisknutím `Ctrl+C`; při příštím spuštění se uložené obce začnou znovu stahovat.
 
 ## Světlý a tmavý režim
@@ -69,11 +71,11 @@ Tlačítkem v pravé části horní lišty přepnete mezi světlým a tmavým vz
 - Výpočet přiděluje mandáty volebním stranám samostatně za každý volební obvod.
 - Průběžné výsledky nemusí obsahovat platné hlasy ve všech obvodech. V takovém případě se mandáty nevypočítají a aplikace vypíše upozornění.
 - Pokud podle zákonných pravidel rozhoduje o mandátu los, aplikace vypíše varování. Uložené virtuální rozdělení v takovém případě používá pořadí kódů kandidátních listin pouze jako deterministický náhled; není to výsledek losování ČSÚ.
-- Konkrétní kandidáty s mandáty aplikace určuje orientačně: podle pořadí na hlasovacím lístku (§ 45 odst. 3). Přeřazení podle hlasů kandidátů (odst. 4) se použije, až ČSÚ hlasy kandidátů zveřejní; průběžná data ČSÚ je zatím neobsahují. Náhradníci (odst. 5) nejsou implementováni.
+- Po dokončení ČSÚ publikuje ve výsledkovém XML jména zvolených zastupitelů a počet jejich hlasů; aplikace tato oficiální data zobrazuje. Hlasy nezvolených kandidátů výsledek XML neobsahuje. Před zveřejněním konečných výsledků může být složení pouze orientační, odvozené podle pořadí na hlasovacím lístku (§ 45 odst. 3). Náhradníci (odst. 5) nejsou implementováni.
 
 ## Kandidáti, vývoj výsledků a složení zastupitelstva
 
-- Na stránce výsledků obce jsou pod tabulkou listin rozbalovací seznamy kandidátů každé listiny (jméno, věk, povolání, bydliště; hlasy kandidáta, až budou ve zdroji, jinak „—“). Kandidáti se berou z registru ČSÚ.
+- Na stránce výsledků obce jsou pod tabulkou listin rozbalovací seznamy kandidátů každé listiny (jméno, věk, povolání, bydliště). Po konečném zpracování se u zvolených kandidátů zobrazí počty hlasů z oficiálního XML ČSÚ; u nezvolených kandidátů je zdroj neuvádí. Kandidáti a jejich základní údaje se berou z registru ČSÚ.
 - Odkaz „Vývoj výsledků a složení zastupitelstva“ otevře stránku s grafy podílu hlasů a virtuálních mandátů stran podle počtu zpracovaných okrsků a se složením zastupitelstva jmenovitě. Stav složení lze vybrat po zpracování libovolného uloženého počtu okrsků; tabulka změn ukazuje, kdo se v čase přidal nebo vypadl.
 - Složení je orientační a závisí na uložených snímcích; při losu je jen náhledem.
 - Při úspěšném načtení výsledky odpovídají poslední uložené odpovědi ČSÚ. Pokud se zdroj dočasně odmlčí, aplikace zobrazí poslední známé výsledky a chybu aktualizace; další pokus provede na pozadí za 60 sekund.
